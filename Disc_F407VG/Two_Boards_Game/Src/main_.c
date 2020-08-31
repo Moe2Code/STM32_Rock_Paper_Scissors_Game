@@ -1,14 +1,35 @@
-/*
- * main_.c
- *
- *  Created on: Dec 08, 2019
- *      Author: 426180
- */
+/**
+  ******************************************************************************
+  * @file    main_.c
+  * @author  Moe2Code
+  * @brief   Main source file for a game of rock, paper, scissors played between two ST boards.
+  *          The game features timers, CAN messaging, RTC time/date keeping, game score keeping
+  *          in the backup SRAM, and low power management of the boards. The following is conducted
+  *          in source file:
+  *          + Initialization and configuration for all the peripherals used
+  *          + Game winner determination and transmission of game result to the other board via CAN
+  *          + Reception of the rolling game score, which will then be printed via UART along with
+  *            time and date. The time and date will be acquired from the RTC peripheral
+  *          + Low power management of board via CAN messages
+  *          + Energization of different LED based on whether the game is a win, loss, or a tie
+  *          + Error handling when errors occur
+  */
 
-
+// Includes
 #include "main.h"
 
 
+// Global variables
+UART_HandleTypeDef huart2 = {0};		// UART2 peripheral handle
+CAN_HandleTypeDef hcan1 = {0};			// CAN1 peripheral handle
+TIM_HandleTypeDef htimer6 = {0};		// Timer 6 (TIM6) peripheral handle. TIM6 is a basic timer
+RTC_HandleTypeDef hrtc = {0};			// RTC peripheral handle
+CAN_RxHeaderTypeDef RxHeader = {0};		// Stores the header of CAN Rx frame
+uint8_t debounce_cnt = 0;				// Counter to ensure we have a stable button input before we send a CAN message
+char DateTime_Info[100] = {0};          // Char array used to hold time and date details when requested
+
+
+// Function prototypes
 void Error_handler(void);
 void SysClockConfig_HSE(uint8_t ClkFreq);
 void UART2_Init(void);
@@ -27,31 +48,23 @@ char* get_date_time(void);
 void clear_sleep_flags(void);
 
 
-UART_HandleTypeDef huart2 = {0};
-CAN_HandleTypeDef hcan1 = {0};
-TIM_HandleTypeDef htimer6 = {0};		// Timer 6 (TIM6) is a basic timer
-RTC_HandleTypeDef hrtc = {0};
-CAN_RxHeaderTypeDef RxHeader = {0};		// Stores the header of Rx frame
-uint8_t debounce_cnt = 0;				// Counter to ensure we have a stable button input before we send a CAN message
-char DateTime_Info[100] = {0};
-
-
-/*
- * This app simulates a game of rock, paper, scissors played between two ST boards.
- * The game features timers, CAN messaging, RTC time/date keeping, game score keeping
- * in the backup SRAM, and low power management of the boards.
- */
-
+/**
+  * @brief	Conducts initialization and configuration for all of the peripherals used
+  * @param	None
+  * @note	None
+  * @retval 0
+  */
 
 int main(void)
 {
-	HAL_Init();
+	HAL_Init();   // HAL layer initialization
 
 	SysClockConfig_HSE(SYSCLK_FREQ_50MHZ);	// PLL via HSE (8 MHz) is used to generate SYSCLK of 50 MHz
-											// Use HSE since it is more accurate than HSI
+											// Used HSE since it is more accurate than HSI
 
 	clear_sleep_flags();	// If woke up from Standby mode clear the associated flags
 
+	// Initialization and configuration to the used peripherals
 	Timer6_Init();
 
 	UART2_Init();
@@ -62,19 +75,20 @@ int main(void)
 
 	RTC_CalendarConfig();
 
-	CAN1_Init();							// Moves CAN from sleep to initialization state
+	CAN1_Init();	// Moves CAN peripheral from sleep to initialization state
 
-	CAN_Filter_Config();					// Filter config for Rx must be done in initialization state
+	CAN_Filter_Config();	// Filter config for CAN Rx must be done in initialization state
 
-	uint32_t active_IT = CAN_IT_TX_MAILBOX_EMPTY | CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_BUSOFF;		// interrupts to activate
-	if( HAL_CAN_ActivateNotification(&hcan1, active_IT) != HAL_OK)   // Activates one or more interrupts
+	uint32_t active_IT = CAN_IT_TX_MAILBOX_EMPTY | CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_BUSOFF;	  // Interrupts to activate for CAN
+
+	if( HAL_CAN_ActivateNotification(&hcan1, active_IT) != HAL_OK)   // Activates the CAN interrupts needed
 	{
-		Error_handler();
+		Error_handler();   // Go to error handler if the activation of interrupts was not successful
 	}
 
 	if(HAL_CAN_Start(&hcan1) != HAL_OK)		// Moves CAN from initialization to normal state
 	{
-		Error_handler();
+		Error_handler();   // Go to error handler if the transfer to normal state was not successful
 	}
 
 	srand(time(NULL));   	// Initialize random seed into rand(); should be called once only

@@ -1,14 +1,36 @@
-/*
- * main_.c
- *
- *  Created on: Jan 13, 2020
- *      Author: 426180
- */
+/**
+  ******************************************************************************
+  * @file    main_.c
+  * @author  Moe2Code
+  * @brief   Main source file for a game of rock, paper, scissors played between two ST boards.
+  *          The game features timers, CAN messaging, RTC time/date keeping, game score keeping
+  *          in the backup SRAM, and low power management of the boards. The following is conducted
+  *          in source file:
+  *          + Initialization and configuration for all the peripherals used
+  *          + Transmission of Nucleo's hand (rock, paper, or scissors) to Discovery board via CAN
+  *          + Reception of message determining the winner of each round via CAN from Discovery
+  *          + Transmission of the rolling game score to Discovery via CAN when requested
+  *          + Low power management of both boards
+  *          + Preservation of rolling game score in backup SRAM
+  */
 
-
+// Includes
 #include "main.h"
 
 
+// Global variables
+UART_HandleTypeDef huart2;				// UART2 peripheral handle
+CAN_HandleTypeDef hcan1;				// CAN1 peripheral handle
+TIM_HandleTypeDef htimer6;				// Timer 6 (TIM6) peripheral handle. TIM6 is a basic timer
+CAN_RxHeaderTypeDef RxHeader;			// Stores the header of CAN Rx frame
+uint8_t nucleo_wins = 0;				// To store the number of wins for Nucleo so far
+uint8_t disc_wins = 0;					// To store the number of wins for Discovery so far
+uint8_t tie_count = 0;					// To store the number of tie games occurred so far
+uint8_t game_err= 0;					// To store the number of errors occurred for game result
+uint8_t *pBKPSRAMbase = (uint8_t*)BKPSRAM_BASE;	  // Pointing to the base address of the backup SRAM
+
+
+// Function prototypes
 void Error_handler(void);
 void SysClockConfig_HSE(uint8_t ClkFreq);
 void UART2_Init(void);
@@ -25,59 +47,54 @@ void send_sleep_msg(void);
 void wakeup_disc(void);
 
 
-UART_HandleTypeDef huart2;
-CAN_HandleTypeDef hcan1;
-TIM_HandleTypeDef htimer6;				// Timer 6 (TIM6) is a basic timer
-CAN_RxHeaderTypeDef RxHeader;			// Stores the header of Rx frame
-uint8_t nucleo_wins = 0;				// To store the number of wins for Nucleo so far
-uint8_t disc_wins = 0;					// To store the number of wins for Disc so far
-uint8_t tie_count = 0;					// To store the number of tie games occurred so far
-uint8_t game_err= 0;					// To store the number of errors occurred for game result
-uint8_t *pBKPSRAMbase = (uint8_t*)BKPSRAM_BASE;	// Pointing to the base address of the backup SRAM
-
-
-/*
- * This app simulates a game of rock, paper, scissors played between two ST boards.
- * The game features timers, CAN messaging, RTC time/date keeping, game score keeping
- * in the backup SRAM, and low power management of the boards.
- */
-
+/**
+  * @brief	Conducts initialization and configuration for all of the peripherals used.
+  *         After exiting the low power standby mode, loading score from backup SRAM and
+  *         waking up Discovery (Disc) board is also conducted by this function.
+  * @param	None
+  * @note	None
+  * @retval 0
+  */
 
 int main(void)
 {
-	HAL_Init();
+	HAL_Init();   // HAL layer initialization
 
-	SysClockConfig_HSE(SYSCLK_FREQ_50MHZ);	// PLL via HSE (8 MHz) is used to generate SYSCLK of 50 MHz
-											// Use HSE since it is more accurate than HSI
+	// PLL via HSE (8 MHz) is used to generate SYSCLK of 50 MHz
+	// Used HSE since it is more accurate than HSI
+	SysClockConfig_HSE(SYSCLK_FREQ_50MHZ);
+
+	// Initialization and configuration to the used peripherals
 	Timer6_Init();
 
 	UART2_Init();
 
 	GPIO_Init();
 
-	// Load bSRAM score if woke up from standby mode
+	// Load the score from the backup SRAM if woke up from standby mode
 	load_bSRAM_score();
 
 	// Wake up Disc board if woke up from standby mode
 	wakeup_disc();
 
-	CAN1_Init();							// Moves CAN from sleep to initialization state
+	CAN1_Init();	// Moves CAN peripheral from sleep to initialization state
 
-	CAN_Filter_Config();					// Filter config for Rx must be done in initialization state
+	CAN_Filter_Config();	// Filter config for CAN Rx must be done in initialization state
 
-	uint32_t active_IT = CAN_IT_TX_MAILBOX_EMPTY | CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_BUSOFF;		// interrupts to activate
-	if(HAL_CAN_ActivateNotification(&hcan1, active_IT) != HAL_OK)   // Activates one or more interrupts
+	uint32_t active_IT = CAN_IT_TX_MAILBOX_EMPTY | CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_BUSOFF;	  // Interrupts to activate for CAN
+
+	if(HAL_CAN_ActivateNotification(&hcan1, active_IT) != HAL_OK)   // Activates the CAN interrupts needed
 	{
 		UART_Msg_Tx("HAL_CAN_ActivateNotification error\r\n");
 
-		Error_handler();
+		Error_handler();   // Go to error handler if the activation of interrupts was not successful
 	}
 
 	if(HAL_CAN_Start(&hcan1) != HAL_OK)		// Moves CAN from initialization to normal state
 	{
 		UART_Msg_Tx("HAL_CAN_Start error\r\n");
 
-		Error_handler();
+		Error_handler();  // Go to error handler if the transfer to normal state was not successful
 	}
 
 	srand(time(NULL));   // Initialize random seed into rand(); should be called once only
@@ -271,7 +288,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 
 
 /**
-  * @brief  Error CAN callback.
+  * @brief  CAN error callback. Error message will be sent via UART to be printed on PC terminal
   * @param  hcan pointer to a CAN_HandleTypeDef structure that contains
   *         the configuration information for the specified CAN.
   * @retval None

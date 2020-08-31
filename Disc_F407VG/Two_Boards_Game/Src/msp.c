@@ -1,10 +1,12 @@
-/*
- * msp.c
- *
- *  Created on: Dec 08, 2019
- *      Author: 426180
- */
+/**
+  ******************************************************************************
+  * @file    msp.c
+  * @author  Moe2Code
+  * @brief   This file provides code for MSP initialization necessary for processor
+  *          and peripherals relied on in the rock paper scissors application.
+  */
 
+// Includes
 #include "main.h"
 
 
@@ -76,7 +78,7 @@ void HAL_CAN_MspInit(CAN_HandleTypeDef *hcan)
 
 
 /**
-  * @brief	Initializes the TIM Base MSP.
+  * @brief	Initializes the timer base MSP.
   * @param 	htim TIM Base handle
   * @retval	None
   */
@@ -138,7 +140,7 @@ void HAL_RTC_MspInit(RTC_HandleTypeDef* hrtc)
 
 
 /**
-  * @brief  UART MSP Init.
+  * @brief  Initializes the UART MSP.
   * @param  huart Pointer to a UART_HandleTypeDef structure that contains
   *         the configuration information for the specified UART module.
   * @retval None
